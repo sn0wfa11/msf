@@ -24,7 +24,8 @@ class MetasploitModule < Msf::Post
       'SessionTypes'  => ['shell', 'meterpreter'],
       'References'    => 
         [
-          [ 'URL', 'https://blog.g0tmi1k.com/2011/08/basic-linux-privilege-escalation/' ]
+          [ 'URL', 'https://blog.g0tmi1k.com/2011/08/basic-linux-privilege-escalation/' ],
+          [ 'URL', 'http://www.securitysift.com/download/linuxprivchecker.py' ]
         ]
     ))
 
