@@ -14,4 +14,6 @@ I welcome suggestions or pull requests to anything include here, but keep in min
 
 **Under Construction**
 
-Look for my Overwatch MSF plugin first ;)
+Look for my Overwatch MSF plugin.
+
+Added a Linux Privilege Escalation Check module to modules/post/linux. Check it out! Still working on adding a kernel exploit suggester to that module. A Windows version will be coming soon!
