@@ -160,6 +160,7 @@ class MetasploitModule < Msf::Post
     output << shellshock
     output << mysql_nopass
     output << mysql_as_root
+    output << sudo_rights
     output << world_writable_passwd
     output << world_writable_shadow
     output << readable_shadow
@@ -218,7 +219,7 @@ class MetasploitModule < Msf::Post
     output << get("World Writeable Directories for Users other than Root", "find / \\( -wholename '/home/homedir*' -prune \\) -o \\( -type d -perm -0002 \\) -exec ls -ld '{}' ';' 2>/dev/null | grep -v root")
     output << get("World Writable Files", "find / \\( -wholename '/home/homedir/*' -prune -o -wholename '/proc/*' -prune \\) -o \\( -type f -perm -0002 \\) -exec ls -l '{}' ';' 2>/dev/null")
     output << get("Checking if root's home folder is accessible", "ls -ahlR /root 2>/dev/null")
-    output << get("SUID Files", "find / \\( -perm -4000 \\) -exec ls -ld {} \\; 2>/dev/null")
+    output << get("SUID Files", "find / \\( -perm -4000 \\) -exec ls -al --full-time {} \\; 2>/dev/null | sort -k6 | cut -d \" \" --complement -f 7,8")
     output << get("SGID Files and Directories", "find / \\( -perm -2000 \\) -exec ls -ld {} \\; 2>/dev/null")
     output << get("PHP Files Containing Keyword: 'password'", "find / -name '*.php' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
     output << smline
@@ -240,7 +241,25 @@ class MetasploitModule < Msf::Post
     output << get("Apache Config File", "cat /etc/apache2/apache2.conf 2>/dev/null")
     output << get("Logs Containing Keyword: 'password'", "find /var/log -name '*.log' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
     output << get("Config Files Containing Keyword: 'password'", "find /etc -name '*.c*' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
-    output << get("[FINAL CHECK] - Listing other home folders", "ls -ahlR /home 2>/dev/null")
+    output << get("Listing other home folders", "ls -ahlR /home 2>/dev/null")
+    output << files_owned_users
+    return output
+  end
+
+  ##########################################
+  # User Enumeration Functions
+  ##########################################
+  def files_owned(user)
+    return get("Files Owned by #{user}", "find / -user #{user} -type f -size +0M -ls 2>/dev/null")
+  end
+
+  def files_owned_users
+    output = "\n[*] Files containing data owned by users other than root\n"
+    initial_list = execute("cat /etc/passwd | grep '/bin/bash'")
+      initial_list.lines.each do |line|
+        user = line.split(':')[0]
+        output << files_owned(user) unless user == "root"
+      end
     return output
   end
 
@@ -299,8 +318,8 @@ class MetasploitModule < Msf::Post
     output = ""
     result = execute("env X='() { :; }; echo \"CVE-2014-6271 vulnerable\"' bash -c date\n")
     if result =~ /vulnerable/
-      print_good("QUICKFAIL!: Shellshock Vulnerable! Look for process running as root to exploit!")
-      output << "\n[+] QUICKFAIL!: Shellshock Vulnerable! Look for process running as root to exploit!\n"
+      print_good("QUICKFAIL!: Shellshock Vulnerable! Look for web app or process running as root to exploit!")
+      output << "\n[+] QUICKFAIL!: Shellshock Vulnerable! Look for web app process running as root to exploit!\n"
       return output
     end
     return ""
@@ -330,6 +349,17 @@ class MetasploitModule < Msf::Post
     return ""
   end
 
+  def sudo_rights
+    user = execute("whoami").downcase
+    output = ""
+    result = execute("cat /etc/group | grep sudo")
+    if result.downcase =~ /#{user}/
+      print_good("QUICKFAIL!: " + user + " is in sudo group! You gotta password?")
+      output << "\n[+] QUICKFAIL!: " + user + " is in sudo group! You gotta password?\n"
+    end
+    return output
+  end
+
   def world_writable_passwd
     output = ""
     result = execute("ls -al /etc/passwd | awk '$1 ~ /^........w./' 2>/dev/null")
@@ -337,9 +367,9 @@ class MetasploitModule < Msf::Post
       print_good("QUICKFAIL!: /etc/passwd is world writable!")
       output << "\n[+] QUICKFAIL!: /etc/passwd is world writable!\n"
       output << format(result)
-      output << "Use hash: $1$5wAs2Vek$MolttqqR2ngg29PV6DacY1\n"
-      output << "Password: 12345\n"
-      output << "\"That's the same combination I have on my luggage!\"\n"
+      output << "\tUse hash: $1$5wAs2Vek$MolttqqR2ngg29PV6DacY1\n"
+      output << "\tPassword: 12345\n"
+      output << "\t\"That's the same combination I have on my luggage!\"\n"
       return output
     end
     return ""
@@ -348,13 +378,14 @@ class MetasploitModule < Msf::Post
   def world_writable_shadow
     output = ""
     result = execute("ls -al /etc/shadow | awk '$1 ~ /^........w./' 2>/dev/null")
-    if result.downcase =~ /passwd/
+    if result.downcase =~ /shadow/
       print_good("QUICKFAIL!: /etc/shadow is world writable!")
       output << "\n[+] QUICKFAIL!: /etc/shadow is world writable!\n"
       output << format(result)
-      output << "Use hash: $1$5wAs2Vek$MolttqqR2ngg29PV6DacY1\n"
-      output << "Password: 12345\n"
-      output << "\"That's the same combination I have on my luggage!\"\n"
+      output << "\nNOTE: YOU NEED TO REBOOT TO RELOAD /etc/shadow!!! Is /etc/password writeable?\n"
+      output << "\tUse hash: $1$5wAs2Vek$MolttqqR2ngg29PV6DacY1\n"
+      output << "\tPassword: 12345\n"
+      output << "\t\"That's the same combination I have on my luggage!\"\n"
       return output
     end
     return ""
