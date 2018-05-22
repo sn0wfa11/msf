@@ -38,13 +38,14 @@ class MetasploitModule < Msf::Post
 
   def run
     final_output = ""
-    @@quick_fails_ouput = ""
+    @@quick_fails_ouput = "\n[*] QUICK FAIL$:\n"
 
-    @@distro = execute("cat /etc/issue")
-    @@kernel_full = execute("cat /proc/version")
+    sysinfo = get_sysinfo
+    @@distro = file_read("/etc/issue").gsub(/\n|\\n|\\l/,'')
+    @@kernel_full = sysinfo[:kernel]
+    @@release = sysinfo[:version] # @@release = execute("cat /etc/*-release")
     @@user = execute("whoami")
     @@hostname = execute("hostname")
-    @@release = execute("cat /etc/*-release")
 
     #kernel_number = kernel_full.split(" ")[2].split("-")[0] if kernel_full
     #kernel_split = kernel_full.split(" ")[2].split("-")[0].split(".") if kernel_full
@@ -139,15 +140,13 @@ class MetasploitModule < Msf::Post
     result.lines.each do |line|
       output << "    #{line}" if line.strip != ""
     end
-    output << "\n"
-    return output
+    return output << "\n"
   end
 
   def prnt(msg, input)
     output = "\n"
     output << "[+] #{msg}\n"
-    output << format(input)
-    return output
+    return output << format(input)
   end
 
   def format(input)
@@ -155,8 +154,103 @@ class MetasploitModule < Msf::Post
     input.lines.each do |line|
       output << "    #{line}" if line.strip != ""
     end
-    output << "\n"
+    return output  << "\n"
+  end
+
+  #################################################
+  # File Read Functions
+  #
+  # Why are these here and not just use cat???
+  # Well... There are some CTF devs who like to
+  # think they are sneaky and replace 'cat' with
+  # say, a program that just prints an ASCII cat...
+  # So these functions eliminate the use of 'cat'
+  # in Meterpreter shells! No more ASCII cats!
+  #################################################
+
+  def file_to_array(file_name)
+    result = file_read(file_name) if file_exist?(file_name)
+    return nil unless result
+    return result.to_s.split("\n")
+  end
+
+  def file_read_grep(file_name, search_str)
+    output = ""
+    array = file_to_array(file_name)
+    return nil unless array
+    array.each do |line|
+      output << "#{line}\n" if line =~ /#{search_str}/
+    end
     return output
+  end
+
+  def get_file(msg, file_name)
+    output = "\n"
+    output << "[+] #{msg}\n"
+    array = file_to_array(file_name)
+    return output << "\n" unless array
+    array.each do |line|
+      output << "    #{line}\n"
+    end
+    return output << "\n"
+  end
+
+  def get_file_grep(msg, file_name, search_str, rev=false)
+    output = "\n"
+    output << "[+] #{msg}\n"
+    array = file_to_array(file_name)
+    return output << "\n" unless array
+    array.each do |line|
+      if rev
+        output << "    #{line}\n" unless line =~ /#{search_str}/
+      else
+        output << "    #{line}\n" if line =~ /#{search_str}/
+      end
+    end
+    return output
+  end
+
+  ########################################################
+  # File Reading Base Functions
+  #
+  # Yes, yes... I stole these from
+  # Msf::Post::File (read_file and _read_file_meterpreter)
+  # I just couldn't handle the error handling...
+  # Do you want a bunch of error messages when it cannot
+  # open a file that you don't have access too?
+  # I thought not ;)
+  ########################################################
+
+  def file_read(file_name)
+    data = nil
+    if session.type == "meterpreter"
+      data = file_read_meterpreter(file_name)
+    elsif session.type == "shell"
+      if session.platform == 'windows'
+        data = session.shell_command_token("type \"#{file_name}\"")
+      else
+        data = session.shell_command_token("cat \"#{file_name}\"")
+      end
+    end
+    return data
+  end
+
+  def file_read_meterpreter(file_name)
+    begin
+      fd = session.fs.file.new(file_name, "rb")
+    rescue ::Rex::Post::Meterpreter::RequestError => e
+      vprint_error("Failed to open file: #{file_name}: #{e}")
+      return nil
+    end
+    data = fd.read
+    begin
+      until fd.eof?
+        data << fd.read
+      end
+    ensure
+      fd.close
+    end
+    return data
   end
 
   ###########################################
@@ -174,11 +268,11 @@ class MetasploitModule < Msf::Post
     output << get("Current User ID", "id")
     output << sudo_rights
     output << get("UDEV - Check for PE if < 141 and Kernel 2.6.x!", "udevadm --version 2>/dev/null")
+    output << get("Printer - CUPS???", "lpstat -a")
     return output
   end
 
   def quick_fails
-    output = "\n[*] QUICK FAIL$:\n"
     output << shellshock
     output << mysql_nopass
     output << mysql_as_root
@@ -187,12 +281,14 @@ class MetasploitModule < Msf::Post
     output << world_writable_passwd
     output << world_writable_shadow
     output << readable_shadow
+    output << check_no_root_squash
+    output << world_writable_exports
     return output
   end
 
   def tools_info
     output = "\n[*] INSTALLED LANGUAGES/TOOLS:\n"
-    output << execute("which awk perl python ruby gcc g++ vi vim nano nmap find netcat nc ncat wget tftp ftp 2>/dev/null")
+    output << execute("which awk perl python ruby gcc g++ vi vim nano nmap find netcat nc ncat wget tftp ftp tcpdump 2>/dev/null")
     return output
   end
 
@@ -208,7 +304,9 @@ class MetasploitModule < Msf::Post
   def filesystem_info
     output = "\n[*] FILESYSTEM INFO:\n"
     output << get("Mount results", "mount")
-    output << get("fstab entries", "cat /etc/fstab 2>/dev/null")
+    output << get_file("fstab entries", "/etc/fstab")
+    output << get("Drive Info", "df -h")
+    output << get_file("Checking Exports: If present look for no_root_squash on NFS.", "/etc/exports")
     output << get("Scheduled cron jobs", "ls -la /etc/cron* 2>/dev/null")
     output << get("Crontab for current user", "crontab -l")
     output << get("Writable cron dirs", "ls -aRl /etc/cron* 2>/dev/null | awk '$1 ~ /w.$/' 2>/dev/null")
@@ -221,10 +319,10 @@ class MetasploitModule < Msf::Post
     output << get("Super Users Found:", "grep -v -E '^#' /etc/passwd | awk -F: '$3 == 0{print $1}'")
     output << get("Environment", "env 2>/dev/null | grep -v 'LS_COLORS'")
     output << get("Root and Current User History (depends on privs)", "ls -la ~/.*_history; ls -la /root/.*_history 2>/dev/null")
-    output << get("Sudoers (privileged)", "cat /etc/sudoers 2>/dev/null | grep -v '#' 2>/dev/null")
-    output << get("All Users", "cat /etc/passwd")
-    output << get("User With Potential Login Rights", "cat /etc/passwd | grep '/bin/bash'")
-    output << get("Group List", "cat /etc/group")
+    output << get_file_grep("Sudoers (privileged)", "/etc/sudoers", "#", true)
+    output << get_file("All Users", "/etc/passwd")
+    output << get_file_grep("User With Potential Login Rights", "/etc/passwd", "/bin/bash")
+    output << get_file("Group List", "/etc/group")
     return output
   end
 
@@ -257,7 +355,7 @@ class MetasploitModule < Msf::Post
     output << get("PHP Files Containing Keyword: 'password'", "find / -name '*.php' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
     output << get("Logs Containing Keyword: 'password'", "find /var/log -name '*.log' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
     output << get("Config Files Containing Keyword: 'password'", "find /etc -name '*.c*' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
-    output << get("Apache Config File", "cat /etc/apache2/apache2.conf 2>/dev/null")
+    output << get_file("Apache Config File", "/etc/apache2/apache2.conf")
     return output
   end
 
@@ -270,7 +368,7 @@ class MetasploitModule < Msf::Post
 
   def files_owned_users
     output = "\n[*] Files containing data owned by users other than root\n"
-    initial_list = execute("cat /etc/passwd | grep '/bin/bash'")
+    initial_list = file_read_grep("/etc/passwd", "/bin/bash")
       initial_list.lines.each do |line|
         user = line.split(':')[0]
         output << files_owned(user) unless user == "root"
@@ -331,7 +429,7 @@ class MetasploitModule < Msf::Post
 
   def cpu_info
     output = ""
-    result = cmd_exec("cat /proc/cpuinfo").to_s
+    result = file_read("/proc/cpuinfo")
     cpu_info = result.split("\n\n")[0]
     cpu_info.split("\n").each do |line|
       output << "Speed: " + line.split(': ')[1] + "\n" if line =~ /cpu MHz/
@@ -393,6 +491,11 @@ class MetasploitModule < Msf::Post
   # Quck-Fail Checks
   ###########################################
 
+  def world_writeable?(file_name)
+    result = execute("ls -al #{file_name} | awk '$1 ~ /^........w./' 2>/dev/null")
+    return result.downcase =~ /#{file_name}/
+  end
+
   def shellshock
     output = ""
     result = execute("env X='() { :; }; echo \"CVE-2014-6271 vulnerable\"' bash -c date\n")
@@ -431,10 +534,10 @@ class MetasploitModule < Msf::Post
   def sudo_group
     user = execute("whoami").downcase
     output = ""
-    result = execute("cat /etc/group | grep sudo")
+    result = file_read_grep("/etc/group", "sudo")
     if result.downcase =~ /#{user}/
-      print_good("QUICKFAIL!: " + user + " is in sudoers group! You gotta password?")
-      output << "\n[+] QUICKFAIL!: " + user + " is in sudoers group! You gotta password?\n"
+      print_good("QUICKFAIL!: " + user + " is in sudoers group! Ya gotta password?")
+      output << "\n[+] QUICKFAIL!: " + user + " is in sudoers group! Ya gotta password?\n"
       output << format(result)
     end
     return output
@@ -455,8 +558,7 @@ class MetasploitModule < Msf::Post
 
   def world_writable_passwd
     output = ""
-    result = execute("ls -al /etc/passwd | awk '$1 ~ /^........w./' 2>/dev/null")
-    if result.downcase =~ /passwd/
+    if world_writeable?("/etc/passwd")
       print_good("QUICKFAIL!: /etc/passwd is world writable!")
       output << "\n[+] QUICKFAIL!: /etc/passwd is world writable!\n"
       output << format(result)
@@ -470,8 +572,7 @@ class MetasploitModule < Msf::Post
 
   def world_writable_shadow
     output = ""
-    result = execute("ls -al /etc/shadow | awk '$1 ~ /^........w./' 2>/dev/null")
-    if result.downcase =~ /shadow/
+    if world_writeable?("/etc/shadow")
       print_good("QUICKFAIL!: /etc/shadow is world writable!")
       output << "\n[+] QUICKFAIL!: /etc/shadow is world writable!\n"
       output << format(result)
@@ -486,13 +587,43 @@ class MetasploitModule < Msf::Post
 
   def readable_shadow
     output = ""
-    result = execute("cat /etc/shadow 2>/dev/null")
-    if result != ""
+    result = file_read("/etc/shadow")
+    if result
       print_good("QUICKFAIL!: /etc/shadow is readable!")
       output << "\n[+] QUICKFAIL!: /etc/shadow is readable!\n"
+      output << "\tStop mining, and crash some hashes!\n"
       output << format(result)
       return output
     end
     return ""
   end
+
+  def check_no_root_squash
+    output = ""
+    result = file_read_grep("/etc/exports", "no_root_squash")
+    if result
+      print_good("QUICKFAIL!: /etc/exports has no_root_squash!")
+      output << "\n[+] QUICKFAIL!: /etc/exports has no_root_squash!\n"
+      output << format(result)
+      output << "\tMount an NFS Share\n"
+      output << "\tAnd... Away, we go...!\n"
+      return output
+    end
+    return ""
+  end
+
+  def world_writable_exports
+    output = ""
+    if world_writeable?("/etc/exports")
+      print_good("QUICKFAIL!: /etc/exports is world writable!")
+      output << "\n[+] QUICKFAIL!: /etc/exports is world writable!\n"
+      output << format(result)
+      output << "\tAdd it a little bit of 'no_root_squash'\n"
+      output << "\tMount an NFS Share\n"
+      output << "\tAnd... Away, we go...!\n"
+      return output
+    end
+    return ""
+  end
+
 end
