@@ -273,6 +273,7 @@ class MetasploitModule < Msf::Post
   end
 
   def quick_fails
+    output = ""
     output << shellshock
     output << mysql_nopass
     output << mysql_as_root
@@ -491,8 +492,8 @@ class MetasploitModule < Msf::Post
   # Quck-Fail Checks
   ###########################################
 
-  def world_writeable?(file_name)
-    result = execute("ls -al #{file_name} | awk '$1 ~ /^........w./' 2>/dev/null")
+  def world_writeable(file_name)
+    result = execute("ls -al #{file_name} 2>/dev/null | awk '$1 ~ /^........w./'")
     return result.downcase =~ /#{file_name}/
   end
 
@@ -558,7 +559,8 @@ class MetasploitModule < Msf::Post
 
   def world_writable_passwd
     output = ""
-    if world_writeable?("/etc/passwd")
+    result = world_writeable("/etc/passwd")
+    if result
       print_good("QUICKFAIL!: /etc/passwd is world writable!")
       output << "\n[+] QUICKFAIL!: /etc/passwd is world writable!\n"
       output << format(result)
@@ -572,7 +574,8 @@ class MetasploitModule < Msf::Post
 
   def world_writable_shadow
     output = ""
-    if world_writeable?("/etc/shadow")
+    result = world_writeable("/etc/shadow")
+    if result
       print_good("QUICKFAIL!: /etc/shadow is world writable!")
       output << "\n[+] QUICKFAIL!: /etc/shadow is world writable!\n"
       output << format(result)
@@ -614,7 +617,8 @@ class MetasploitModule < Msf::Post
 
   def world_writable_exports
     output = ""
-    if world_writeable?("/etc/exports")
+    result = world_writeable("/etc/exports")
+    if result
       print_good("QUICKFAIL!: /etc/exports is world writable!")
       output << "\n[+] QUICKFAIL!: /etc/exports is world writable!\n"
       output << format(result)
