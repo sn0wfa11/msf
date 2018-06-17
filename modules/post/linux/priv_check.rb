@@ -93,7 +93,7 @@ class MetasploitModule < Msf::Post
     file_dir_perms_output = file_dir_perms
 
     print_status("9 / 10 - Getting Processes and Application Information")
-    proc_aps_info_output = proc_aps_info(@@release)
+    proc_aps_info_output = proc_aps_info
 
     if datastore['DEEP']
       print_status("10 / 10 - Getting Extra Information and Performing Deep File Search")
@@ -387,9 +387,9 @@ class MetasploitModule < Msf::Post
     return output
   end
 
-  def proc_aps_info(release)
+  def proc_aps_info
     output = "\n[*] PROCESSES AND APPLICATIONS:\n"
-    output << get_services(release)
+    output << get_services(@@release)
     output << get("Current processes", "ps aux | awk '{print $1,$2,$9,$10,$11}'")
     output << get("Process binary path and permissions", "ps aux 2>/dev/null | awk '{print $11}'|xargs -r ls -la 2>/dev/null |awk '!x[$0]++' 2>/dev/null")
     output << get_h("Apache Version and Modules", "apache2 -v 2>/dev/null; apache2ctl -M 2>/dev/null; httpd -v 2>/dev/null; apachectl -l 2>/dev/null")
@@ -406,7 +406,7 @@ class MetasploitModule < Msf::Post
     output << get_h("Logs Containing Keyword: 'password'", "find /var/log -name '*.log' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
     output << get_h("Config Files Containing Keyword: 'password'", "find /etc -name '*.c*' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
     output << get_file("Apache Config File", "/etc/apache2/apache2.conf")
-    output << get_packages(release)
+    output << get_packages(@@release)
     return output
   end
 
