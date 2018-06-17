@@ -25,7 +25,8 @@ class MetasploitModule < Msf::Post
       'References'    => 
         [
           [ 'URL', 'https://blog.g0tmi1k.com/2011/08/basic-linux-privilege-escalation/' ],
-          [ 'URL', 'http://www.securitysift.com/download/linuxprivchecker.py' ]
+          [ 'URL', 'http://www.securitysift.com/download/linuxprivchecker.py' ],
+          [ 'URL', 'https://github.com/rebootuser/LinEnum' ]
         ]
     ))
 
@@ -45,7 +46,11 @@ class MetasploitModule < Msf::Post
     @@distro = file_read("/etc/issue")
     @@distro = @@distro.gsub(/\n|\\n|\\l/,'') if @@distro
     @@kernel_full = sysinfo[:kernel]
-    @@release = sysinfo[:version]
+    if sysinfo[:version] && sysinfo[:version] != ""
+      @@release = sysinfo[:version]
+    else
+      @@release = @@distro
+    end
     @@user = execute("whoami")
     @@hostname = execute("hostname")
 
@@ -63,35 +68,38 @@ class MetasploitModule < Msf::Post
     final_output << "LINUX PRIVILEGE ESCALATION CHECKS by sn0wfa11"
     final_output << bigline
 
-    print_status("1 / 9 - Getting Basic Info")
+    print_status("1 / 10 - Getting Basic Info")
     basic_info_output = basic_info
 
-    print_status("2 / 9 - Looking for Initial Quick Fails")
+    print_status("2 / 10 - Looking for Initial Quick Fails")
     @@quick_fails_ouput << quick_fails
 
-    print_status("3 / 9 - Getting App and Tool Info")
+    print_status("3 / 10 - Getting App and Tool Info")
     tools_info_output = tools_info
 
-    print_status("4 / 9 - Getting Network Info")
+    print_status("4 / 10 - Getting Network Info")
     network_info_output = network_info
 
-    print_status("5 / 9 - Getting Basic File System Info")
+    print_status("5 / 10 - Getting Basic File System Info")
     filesystem_info_output = filesystem_info
 
-    print_status("6 / 9 - Getting User and Environmental Info")
-    userenv_info_output = userenv_info
+    print_status("6 / 10 - Getting User Info")
+    user_info_output = user_info
 
-    print_status("7 / 9 - Getting File and Directory Permissions")
+    print_status("7 / 10 - Getting Environmental Info")
+    env_info_output = env_info
+
+    print_status("8 / 10 - Getting File and Directory Permissions")
     file_dir_perms_output = file_dir_perms
 
-    print_status("8 / 9 - Getting Processes and Application Information")
+    print_status("9 / 10 - Getting Processes and Application Information")
     proc_aps_info_output = proc_aps_info(@@release)
 
     if datastore['DEEP']
-      print_status("9 / 9 - Getting Extra Information and Performing Deep File Search")
+      print_status("10 / 10 - Getting Extra Information and Performing Deep File Search")
       extra_info_output = extra_info
     else
-      print_status("9 / 9 - Skipping Deep File Search")
+      print_status("10 / 10 - Skipping Deep File Search")
       extra_info_output = ""
     end
 
@@ -106,7 +114,9 @@ class MetasploitModule < Msf::Post
     final_output << smline
     final_output << filesystem_info_output
     final_output << smline
-    final_output << userenv_info_output
+    final_output << user_info_output
+    final_output << smline
+    final_output << env_info_output
     final_output << smline
     final_output << file_dir_perms_output
     final_output << smline
@@ -152,6 +162,18 @@ class MetasploitModule < Msf::Post
     return output << "\n"
   end
 
+  def get_h(msg, cmd)
+    output = "\n"
+    output << "[+] #{msg}\n"
+    result = execute(cmd)
+    return "" if !result or result == ""
+    result.lines.each do |line|
+      output << "    #{line}" if line.strip != ""
+    end
+    return output << "\n"
+  end
+
+
   def prnt(msg, input)
     output = "\n"
     output << "[+] #{msg}\n"
@@ -180,7 +202,7 @@ class MetasploitModule < Msf::Post
 
   def file_to_array(file_name)
     result = file_read(file_name) if file_exist?(file_name)
-    return nil unless result
+    return nil unless result && result != ""
     return result.to_s.split("\n")
   end
 
@@ -198,7 +220,7 @@ class MetasploitModule < Msf::Post
     output = "\n"
     output << "[+] #{msg}\n"
     array = file_to_array(file_name)
-    return output << "\n" unless array
+    return "" unless array
     array.each do |line|
       output << "    #{line}\n"
     end
@@ -209,7 +231,7 @@ class MetasploitModule < Msf::Post
     output = "\n"
     output << "[+] #{msg}\n"
     array = file_to_array(file_name)
-    return output << "\n" unless array
+    return "" unless array
     array.each do |line|
       if rev
         output << "    #{line}\n" unless line =~ /#{search_str}/
@@ -272,13 +294,13 @@ class MetasploitModule < Msf::Post
     output << prnt("Kernel", @@kernel_full)
     output << prnt("Hostname", @@hostname)
     output << prnt("Operating System", @@distro)
-    output << prnt("Full Release Info", @@release)
+    output << prnt("Full Release Info", @@release) if @@release && @@release != ""
     output << cpu_info
     output << prnt("Current User", @@user)
     output << get("Current User ID", "id")
     output << sudo_rights
-    output << get("UDEV - Check for PE if < 141 and Kernel 2.6.x!", "udevadm --version 2>/dev/null")
-    output << get("Printer - CUPS???", "lpstat -a")
+    output << get_h("UDEV - Check for PE if < 141 and Kernel 2.6.x!", "udevadm --version 2>/dev/null")
+    output << get_h("Printer - CUPS???", "lpstat -a 2>/dev/null")
     return output
   end
 
@@ -301,7 +323,6 @@ class MetasploitModule < Msf::Post
     output = "\n[*] PROGRAMMING LANGUAGES AND DEV TOOLS:\n"
     output << execute("which awk perl python ruby gcc g++ vi vim nano nmap find netcat nc ncat wget tftp ftp tcpdump 2>/dev/null")
     output << "\n"
-    output << get("GIT Directories", "find / \\( -type d -name \".git\" \\) -exec ls -ld {} \\; 2>/dev/null")
     return output
   end
 
@@ -310,7 +331,7 @@ class MetasploitModule < Msf::Post
     output << get("Interfaces", "/sbin/ifconfig -a")
     output << get("Netstat", "netstat -antup | grep -v 'TIME_WAIT' | grep -v 'CLOSE_WAIT'")
     output << get("Route", "/sbin/route")
-    output << get("Iptables", "iptables -L 2>/dev/null")
+    output << get_h("Iptables", "iptables -L 2>/dev/null")
     return output
   end
 
@@ -321,22 +342,36 @@ class MetasploitModule < Msf::Post
     output << get("Drive Info", "df -h")
     output << get_file("Checking Exports: If present look for no_root_squash on NFS.", "/etc/exports")
     output << get("Scheduled cron jobs", "ls -la /etc/cron* 2>/dev/null")
-    output << get("Crontab for current user", "crontab -l")
-    output << get("Writable cron dirs", "ls -aRl /etc/cron* 2>/dev/null | awk '$1 ~ /w.$/' 2>/dev/null")
+    output << get_h("Crontab for current user", "crontab -l")
+    output << get_h("Writable cron dirs", "ls -aRl /etc/cron* 2>/dev/null | awk '$1 ~ /w.$/' 2>/dev/null")
+    output << get_h("Anything in /var/spool/cron/crontabs", "ls -la /var/spool/cron/crontabs 2>/dev/null")
+    output << get_h("Anacron Jobs", "ls -la /etc/anacrontab 2>/dev/null; cat /etc/anacrontab 2>/dev/null")
     return output
   end
 
-  def userenv_info
-    output = "\n[*] USER AND ENVIRONMENTAL INFO:\n"
+  def user_info
+    output = "\n[*] USER INFO:\n"
     output << get("Logged in User Activity", "w 2>/dev/null")
-    output << get("Super Users Found:", "grep -v -E '^#' /etc/passwd | awk -F: '$3 == 0{print $1}'")
-    output << get("Environment", "env 2>/dev/null | grep -v 'LS_COLORS'")
-    output << get("Root and Current User History (depends on privs)", "ls -la ~/.*_history; ls -la /root/.*_history 2>/dev/null")
+    output << get("Last user to log in", "lastlog 2>/dev/null | grep -v \"Never\" 2>/dev/null")
+    output << get_h("Super Users Found:", "grep -v -E '^#' /etc/passwd | awk -F: '$3 == 0{print $1}'")
+    output << get_h("Sudoers Configuration", "grep -v -e '^$' /etc/sudoers 2>/dev/null |grep -v \"#\" 2>/dev/null")
+    output << get_h("Recent sudo's", "find /home -name .sudo_as_admin_successful 2>/dev/null")
+    output << get_h("Root Permitted to SSH", "grep \"PermitRootLogin \" /etc/ssh/sshd_config 2>/dev/null | grep -v \"#\" | awk '{print  $2}'")
+    output << get_h("Root and Current User History (depends on privs)", "ls -la ~/.*_history; ls -la /root/.*_history 2>/dev/null")
     output << get_file_grep("Sudoers (privileged)", "/etc/sudoers", "#", true)
     output << get_file("All Users", "/etc/passwd")
     output << get_file_grep("User With Potential Login Rights", "/etc/passwd", "/bin/bash")
     output << get_file("Group List", "/etc/group")
     return output
+  end
+
+  def env_info
+    output = "\n[*] ENVIRONMENTAL INFO:\n"
+    output << get_h("SELinux Status", "sestatus 2>/dev/null")
+    output << get_file("Available Shells", "/etc/shells")
+    output << get("Current Umask values", "umask -S 2>/dev/null; umask 2>/dev/null")
+    output << get("Umask in /etc/login.defs", "grep -i \"^UMASK\" /etc/login.defs 2>/dev/null")
+    output << get("Environment Variables", "env 2>/dev/null | grep -v 'LS_COLORS'")
   end
 
   def file_dir_perms
@@ -356,20 +391,22 @@ class MetasploitModule < Msf::Post
     output = "\n[*] PROCESSES AND APPLICATIONS:\n"
     output << get_services(release)
     output << get("Current processes", "ps aux | awk '{print $1,$2,$9,$10,$11}'")
-    output << get("Apache Version and Modules", "apache2 -v 2>/dev/null; apache2ctl -M 2>/dev/null; httpd -v 2>/dev/null; apachectl -l 2>/dev/null")
-    output << get_packages(release)
+    output << get("Process binary path and permissions", "ps aux 2>/dev/null | awk '{print $11}'|xargs -r ls -la 2>/dev/null |awk '!x[$0]++' 2>/dev/null")
+    output << get_h("Apache Version and Modules", "apache2 -v 2>/dev/null; apache2ctl -M 2>/dev/null; httpd -v 2>/dev/null; apachectl -l 2>/dev/null")
     return output
   end
 
   def extra_info
     output = "\n[*] Extra Information and Deep File Search:\n"
-    output << get("Find files with readable RSA Private Keys", "grep -Irni \"BEGIN RSA PRIVATE KEY\" / 2>/dev/null")
+    output << get_h("Find files with readable RSA Private Keys", "grep -Irni \"BEGIN RSA PRIVATE KEY\" / 2>/dev/null")
+    output << get_h("GIT Directories", "find / \\( -type d -name \".git\" \\) -exec ls -ld {} \\; 2>/dev/null")
     output << get("Listing other home folders", "ls -ahlR /home 2>/dev/null")
     output << files_owned_users
-    output << get("PHP Files Containing Keyword: 'password'", "find / -name '*.php' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
-    output << get("Logs Containing Keyword: 'password'", "find /var/log -name '*.log' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
-    output << get("Config Files Containing Keyword: 'password'", "find /etc -name '*.c*' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
+    output << get_h("PHP Files Containing Keyword: 'password'", "find / -name '*.php' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
+    output << get_h("Logs Containing Keyword: 'password'", "find /var/log -name '*.log' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
+    output << get_h("Config Files Containing Keyword: 'password'", "find /etc -name '*.c*' 2>/dev/null | xargs -l10 egrep 'pwd|password|Password|PASSWORD' 2>/dev/null")
     output << get_file("Apache Config File", "/etc/apache2/apache2.conf")
+    output << get_packages(release)
     return output
   end
 
@@ -539,7 +576,7 @@ class MetasploitModule < Msf::Post
   def mysql_as_root
     output = ""
     result = execute("ps aux | grep mysql | grep root | grep -v grep")
-    if result.downcase =~ /mysql/ and !result.downcase =~ /mysqld_safe/
+    if result.downcase =~ /mysql/ && !result.downcase =~ /mysqld_safe/
       print_good("QUICKFAIL!: mysql is running as root!")
       output << "\n[+] QUICKFAIL!: mysql is running as root!\n"
       output << format(result)
