@@ -321,7 +321,7 @@ class MetasploitModule < Msf::Post
 
   def tools_info
     output = "\n[*] PROGRAMMING LANGUAGES AND DEV TOOLS:\n"
-    output << execute("which awk perl python ruby gcc g++ vi vim nano nmap find netcat nc ncat wget tftp ftp tcpdump 2>/dev/null")
+    output << execute("which awk perl python ruby gcc g++ vi vim nano nmap find netcat nc ncat wget tftp ftp tcpdump tmux screen 2>/dev/null")
     output << "\n"
     return output
   end
@@ -357,7 +357,8 @@ class MetasploitModule < Msf::Post
     output << get_h("Sudoers Configuration", "grep -v -e '^$' /etc/sudoers 2>/dev/null |grep -v \"#\" 2>/dev/null")
     output << get_h("Recent sudo's", "find /home -name .sudo_as_admin_successful 2>/dev/null")
     output << get_h("Root Permitted to SSH", "grep \"PermitRootLogin \" /etc/ssh/sshd_config 2>/dev/null | grep -v \"#\" | awk '{print  $2}'")
-    output << get_h("Root and Current User History (depends on privs)", "ls -la ~/.*_history; ls -la /root/.*_history 2>/dev/null")
+    output << get_h("Root and Current User History Rights (depends on privs)", "ls -la ~/.*_history; ls -la /root/.*_history 2>/dev/null")
+    output << history_info
     output << get_file_grep("Sudoers (privileged)", "/etc/sudoers", "#", true)
     output << get_file("All Users", "/etc/passwd")
     output << get_file_grep("User With Potential Login Rights", "/etc/passwd", "/bin/bash")
@@ -372,6 +373,8 @@ class MetasploitModule < Msf::Post
     output << get("Current Umask values", "umask -S 2>/dev/null; umask 2>/dev/null")
     output << get("Umask in /etc/login.defs", "grep -i \"^UMASK\" /etc/login.defs 2>/dev/null")
     output << get("Environment Variables", "env 2>/dev/null | grep -v 'LS_COLORS'")
+    output << get_h("Sockets - Look for strange stuff. Is tmux or screen installed?", "find / \\( -type s \\) -exec ls -ld {} \\; 2>/dev/null")
+    output << get_h("Pipes - Look for strange stuff. Is tmux or screen installed?", "find / \\( -type p \\) -exec ls -ld {} \\; 2>/dev/null")
   end
 
   def file_dir_perms
@@ -477,6 +480,16 @@ class MetasploitModule < Msf::Post
   ###########################################
   # Specific Checks
   ###########################################
+
+  def history_info
+    output = ""
+    files = execute("ls ~/.*_history; ls /root/.*_history 2>/dev/null")
+    return "" unless files
+    files.lines.each do |line|
+      output << get_file("History #{line}", line)
+    end
+    return output
+  end
 
   def cpu_info
     output = ""
