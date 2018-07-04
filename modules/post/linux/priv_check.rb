@@ -7,6 +7,8 @@ class MetasploitModule < Msf::Post
   include Msf::Post::File
   include Msf::Post::Linux::System
 
+  SUID_SUDO_FILES = [ 'nmap', 'vim', 'nano', 'perl', 'python', 'find', 'pip', 'more', 'less', 'ruby', 'php', 'lua', 'tcpdump', 'bash' ] 
+
   def initialize(info = {})
     super(update_info(info,
       'Name'          => 'Linux Privilege Escalation Information Gathering',
@@ -62,7 +64,11 @@ class MetasploitModule < Msf::Post
     print_good("Info:")
     print_good("\t#{@@distro}")
     print_good("\t#{@@kernel_full}")
-    print_good("\tModule running as \"#{@@user}\" user against #{@@hostname}")
+    if datastore['PASSWORD']
+      print_good("\tModule running as \"#{@@user}\" user against #{@@hostname} with password: #{datastore['PASSWORD']}")
+    else
+      print_good("\tModule running as \"#{@@user}\" user against #{@@hostname}")
+    end
 
     final_output << bigline
     final_output << "LINUX PRIVILEGE ESCALATION CHECKS by sn0wfa11"
@@ -321,7 +327,7 @@ class MetasploitModule < Msf::Post
 
   def tools_info
     output = "\n[*] PROGRAMMING LANGUAGES AND DEV TOOLS:\n"
-    output << execute("which awk perl python ruby gcc g++ vi vim nano nmap find netcat nc ncat wget tftp ftp tcpdump tmux screen 2>/dev/null")
+    output << execute("which awk perl python pip ruby gcc g++ vi vim nano nmap find netcat nc ncat wget tftp ftp tcpdump tmux screen 2>/dev/null")
     output << "\n"
     return output
   end
@@ -512,47 +518,60 @@ class MetasploitModule < Msf::Post
     return "" unless files
     files = files.split("\n")
     files.each do |file|
-      if file.downcase =~ /nmap/
-        print_good("QUICKFAIL!: nmap has suid bit set!")
-        @@quick_fails_ouput << "\n[+] QUICKFAIL!: nmap has suid bit set! Do: 'nmap --interactive' then 'nmap> !sh'\n"
-        @@quick_fails_ouput << format(file)
-      elsif file.downcase =~ /vim/
-        print_good("QUICKFAIL!: vim has suid bit set!")
-        @@quick_fails_ouput << "\n[+] QUICKFAIL!: vim has suid bit set! You can edit protected files with this!\n"
-        @@quick_fails_ouput << format(file)
-      elsif file.downcase =~ /nano/
-        print_good("QUICKFAIL!: nano has suid bit set!")
-        @@quick_fails_ouput << "\n[+] QUICKFAIL!: nano has suid bit set! You can edit protected files with this!\n"
-        @@quick_fails_ouput << format(file)
-      elsif file.downcase =~ /perl/
-        print_good("QUICKFAIL!: perl has suid bit set!")
-        @@quick_fails_ouput << "\n[+] QUICKFAIL!: perl has suid bit set!\n"
-        @@quick_fails_ouput << format(file)
-      elsif file.downcase =~ /python/
-        print_good("QUICKFAIL!: python has suid bit set!")
-        @@quick_fails_ouput << "\n[+] QUICKFAIL!: python has suid bit set!\n"
-        @@quick_fails_ouput << format(file)
-      elsif file.downcase =~ /ruby/
-        print_good("QUICKFAIL!: ruby has suid bit set!")
-        @@quick_fails_ouput << "\n[+] QUICKFAIL!: ruby has suid bit set!\n"
-        @@quick_fails_ouput << format(file)
-      end
+      check_suid_file(file)
       output << "#{file}\n"
     end
     return prnt("SUID Files", output)
   end
 
+  def check_suid_file(file)
+    check_files = SUID_SUDO_FILES.dup
+    check_files.each do |check_file|
+      if file.downcase =~ /#{check_file}/
+        print_good("QUICKFAIL!: #{check_file} has suid bit set!")
+        @@quick_fails_ouput << "\n[+] QUICKFAIL!: #{check_file} has suid bit set!\n"
+        @@quick_fails_ouput << format(file)
+      end
+    end
+  end
+
   def sudo_rights
     output = ""
-    result = execute("sudo -l", 15)
+    if datastore['PASSWORD']
+      password = datastore['PASSWORD']
+      result = execute("echo #{password} | sudo -S -l", 15)
+    else
+      result = execute("sudo -l", 15)
+    end
     if result.downcase =~ /may run/
-      print_good("QUICKFAIL!: User #{@@user} has sudo rights!")
-      @@quick_fails_ouput << "\n[+] QUICKFAIL!: User #{@@user} has sudo rights!\n"
+      print_good("User #{@@user} has some sudo rights, check output...")
+      @@quick_fails_ouput << "\n[+] User #{@@user} has some sudo rights, check output...\n"
+      @@quick_fails_ouput << format(result)
+      if result.downcase =~ /\*/
+        print_good("QUICKFAIL!: User #{@@user} has possible wildcard in sudo!")
+        @@quick_fails_ouput << "\n[+] QUICKFAIL!: User #{@@user} has possible wildcard in sudo!\n"
+        @@quick_fails_ouput << format(result)
+      end
+      check_sudo_run(result)
+    end
+    if result.downcase =~ /\!env_reset/
+      print_good("QUICKFAIL!: User #{@@user} has property '!env_reset' in sudo!")
+      @@quick_fails_ouput << "\n[+] QUICKFAIL!: User #{@@user} has property '!env_reset' in sudo!\n"
       @@quick_fails_ouput << format(result)
     end
     return prnt("SUDO rights check", result)
   end
 
+  def check_sudo_run(input)
+    check_files = SUID_SUDO_FILES.dup
+    check_files.each do |check_file|
+      if input.downcase =~ /#{check_file}/
+        print_good("QUICKFAIL!: User #{@@user} has sudo rights to #{check_file}!")
+        @@quick_fails_ouput << "\n[+] QUICKFAIL!: User #{@@user} has sudo rights to #{check_file}!\n"
+        @@quick_fails_ouput << format(input)
+      end
+    end
+  end
 
   ###########################################
   # Quck-Fail Checks
@@ -611,13 +630,16 @@ class MetasploitModule < Msf::Post
   end
 
   def sudo_su_check
-    return "" unless datastore['PASSWORD']
     output = ""
-    password = datastore['PASSWORD']
-    result = execute("echo #{password} | sudo -S su -c id")
-    if result.downcase =~ /root/
+    if datastore['PASSWORD']
+      password = datastore['PASSWORD']
+      result = execute("echo #{password} | sudo -S su -c id", 15)
+    else
+      result = execute("sudo -S su -c id", 15)
+    end
+    if result.downcase =~ /\(root\)/
       print_good("QUICKFAIL!: User #{@@user} has sudo su rights! And... You're DONE!")
-      ouput << "\n[+] QUICKFAIL!: User #{@@user} has sudo su rights! And... You're DONE!\n"
+      output << "\n[+] QUICKFAIL!: User #{@@user} has sudo su rights! And... You're DONE!\n"
       output << format(result)
     end
     return output
