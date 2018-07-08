@@ -14,8 +14,9 @@ class MetasploitModule < Msf::Post
       'Name'          => 'Linux Privilege Escalation Information Gathering',
       'Description'   => %q{
         This module gathers a multitude of information for Linux privilege
-        escalation without writing to the target. Based on linuxprivchecker.py
-        by Mike Czumak and "Basic Linux Privilege Escalation" by g0tmi1l.
+        escalation without writing to the target. Initial work based on 
+        linuxprivchecker.py by Mike Czumak and "Basic Linux Privilege Escalation" by g0tmi1l. 
+        With further improvements as I discover unique methods for PE.
       },
       'License'       => MSF_LICENSE,
       'Author'        =>
@@ -322,12 +323,13 @@ class MetasploitModule < Msf::Post
     output << readable_shadow
     output << check_no_root_squash
     output << world_writable_exports
+    output << docker_group
     return output
   end
 
   def tools_info
     output = "\n[*] PROGRAMMING LANGUAGES AND DEV TOOLS:\n"
-    output << execute("which awk perl python pip ruby gcc g++ vi vim nano nmap find netcat nc ncat wget tftp ftp tcpdump tmux screen 2>/dev/null")
+    output << execute("which awk perl python pip ruby gcc g++ vi vim nano nmap find netcat nc ncat wget curl tftp ftp tcpdump tmux screen 2>/dev/null")
     output << "\n"
     return output
   end
@@ -713,6 +715,19 @@ class MetasploitModule < Msf::Post
       output << "\tAdd it a little bit of 'no_root_squash'\n"
       output << "\tMount an NFS Share\n"
       output << "\tAnd... Away, we go...!\n"
+      return output
+    end
+    return ""
+  end
+
+  def docker_group
+    output = ""
+    result = execute("id")
+    if result.downcase =~ /\(docker\)/
+      print_good("QUICKFAIL!: User #{@@user} is in the 'docker' group!")
+      output << "\n[+] QUICKFAIL!: User #{@@user} is in the 'docker' group!\n"
+      output << format(result)
+      output << "\tTry a little: 'exploit/linux/local/docker_daemon_privilege_escalation'\n"
       return output
     end
     return ""
