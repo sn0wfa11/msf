@@ -37,7 +37,10 @@ class MetasploitModule < Msf::Post
       [
         OptInt.new('TIMEOUT', [ true, "Timeout on the execute command. (In seconds)", 300]),
         OptString.new('PASSWORD', [ false, "Password of current user, for 'sudo su' check"]),
-        OptBool.new('DEEP', [ true, "Perform Deep File Scan", true])
+        OptBool.new('DEEP', [ true, "Perform Deep File Scan", true]),
+        OptBool.new('LES', [ true, "Run Linux Exploit Suggester Script (Requires writable directory)", false]),
+        OptString.new('WRITEABLE_DIR', [ false, "Writeable directory on target for Linux Exploit Suggester", "/tmp"]),
+        OptString.new('LES_PATH', [ false, "Path to Linux Exploit Suggester on Local Machine", "/root/git/linux-exploit-suggester/linux-exploit-suggester.sh"])
       ], self.class)
   end
 
@@ -75,63 +78,65 @@ class MetasploitModule < Msf::Post
     final_output << "LINUX PRIVILEGE ESCALATION CHECKS by sn0wfa11"
     final_output << bigline
 
-    print_status("1 / 10 - Getting Basic Info")
+    print_status("Getting Basic Info")
     basic_info_output = basic_info
 
-    print_status("2 / 10 - Looking for Initial Quick Fails")
+    print_status("Looking for Initial Quick Fails")
     @@quick_fails_ouput << quick_fails
 
-    print_status("3 / 10 - Getting App and Tool Info")
+    if datastore['LES']
+      write_dir = datastore['WRITEABLE_DIR']
+      les_path = datastore['LES_PATH']
+      print_error("You must provide a writeable directory to run Linux Exploit Suggester") if !write_dir
+      print_error("You must provide a path Linux Exploit Suggester") if !les_path
+      les_output = prnt("Linux Exploit Suggester", les(les_path, write_dir)) if les_path && write_dir
+    end
+
+    print_status("Getting App and Tool Info")
     tools_info_output = tools_info
 
-    print_status("4 / 10 - Getting Network Info")
+    print_status("Getting Network Info")
     network_info_output = network_info
 
-    print_status("5 / 10 - Getting Basic File System Info")
+    print_status("Getting Basic File System Info")
     filesystem_info_output = filesystem_info
 
-    print_status("6 / 10 - Getting User Info")
+    print_status("Getting User Info")
     user_info_output = user_info
 
-    print_status("7 / 10 - Getting Environmental Info")
+    print_status("Getting Environmental Info")
     env_info_output = env_info
 
-    print_status("8 / 10 - Getting File and Directory Permissions")
+    print_status("Getting File and Directory Permissions")
     file_dir_perms_output = file_dir_perms
 
-    print_status("9 / 10 - Getting Processes and Application Information")
+    print_status("Getting Processes and Application Information")
     proc_aps_info_output = proc_aps_info
 
     if datastore['DEEP']
-      print_status("10 / 10 - Getting Extra Information and Performing Deep File Search")
+      print_status("Getting Extra Information and Performing Deep File Search")
       extra_info_output = extra_info
     else
-      print_status("10 / 10 - Skipping Deep File Search")
+      print_status("Skipping Deep File Search")
       extra_info_output = ""
     end
 
     # Build final output
-    final_output << basic_info_output
-    final_output << smline
-    final_output << @@quick_fails_ouput
-    final_output << smline
-    final_output << tools_info_output
-    final_output << smline
-    final_output << network_info_output
-    final_output << smline
-    final_output << filesystem_info_output
-    final_output << smline
-    final_output << user_info_output
-    final_output << smline
-    final_output << env_info_output
-    final_output << smline
-    final_output << file_dir_perms_output
-    final_output << smline
-    final_output << proc_aps_info_output
-    final_output << smline
-    final_output << extra_info_output
+    final_output << basic_info_output + smline
+    final_output << @@quick_fails_ouput + smline
+    final_output << les_output + smline if les_output
+    final_output << tools_info_output + smline
+    final_output << network_info_output + smline
+    final_output << filesystem_info_output + smline
+    final_output << user_info_output + smline
+    final_output << env_info_output + smline
+    final_output << file_dir_perms_output + smline
+    final_output << proc_aps_info_output + smline
+    final_output << extra_info_output + smline
     final_output << bigline
     save(final_output)
+
+
   end
 
   ###########################################
@@ -194,6 +199,66 @@ class MetasploitModule < Msf::Post
       output << "    #{line}" if line.strip != ""
     end
     return output  << "\n"
+  end
+
+  #################################################
+  # Linux Exploit Suggester Functions
+  #################################################
+
+  def les(les_path, write_dir)
+    output = ""
+    print_status("\nLinux Exploit Suggester")
+
+    les_plant = upload_les(les_path, write_dir)
+    if les_plant
+      print_status("Setting Executable Rights")
+      execute("chmod +x #{les_plant}")
+      print_status("Running Linux Exploit Suggester... Stand by...")
+      output = execute("#{les_plant}")
+      if output != ""
+        print("\n#{output}\n")
+        output = format_les(output)
+      else
+        print_error("Linux Exploit Suggester Execution Failed :(")
+      end
+      rm_f(les_plant)
+      return output
+    else
+      return ""
+    end
+  end
+
+  def upload_les(les_path, write_dir)
+    les_target = "#{write_dir}/#{Rex::Text.rand_text_alpha(8, "")}.sh"
+    print_status("Attempting to upload #{les_path} to #{les_target} on #{sysinfo['Computer']}...")
+    
+    begin
+      upload_file(les_target, les_path)
+      if file?(les_target)
+        print_good("LES uploaded!") 
+        return les_target
+      else
+        print_error("Unable to upload")
+        return nil
+      end
+    rescue ::Exception => e
+      print_error("Error uploading LES: #{e.class} #{e}")
+      print_error(e.to_s)
+      return nil
+    end
+  end
+
+  def format_les(input)
+    output = input.gsub("[0m", "")
+    output = output.gsub("[1;37m", "")
+    output = output.gsub("[1;32m", "")
+    output = output.gsub("[1;36m", "")
+    output = output.gsub("[1;32m", "")
+    output = output.gsub("[1;34m", "")
+    output = output.gsub("[1;93m", "")
+    output = output.gsub("[0;93m", "")
+    output = output.gsub("[91;1m", "[*!]-> ")
+    return output
   end
 
   #################################################
