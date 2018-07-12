@@ -7,7 +7,7 @@ class MetasploitModule < Msf::Post
   include Msf::Post::File
   include Msf::Post::Linux::System
 
-  SUID_SUDO_FILES = [ 'nmap', 'vim', 'nano', 'perl', 'python', 'find', 'pip', 'more', 'less', 'ruby', 'php', 'lua', 'tcpdump', 'bash' ] 
+  SUID_SUDO_FILES = [ 'nmap', 'vim', 'nano', 'perl', 'python', 'find', 'pip', 'more', 'less', 'ruby', 'php', 'lua', 'tcpdump', 'bash', 'socat' ] 
 
   def initialize(info = {})
     super(update_info(info,
@@ -606,9 +606,9 @@ class MetasploitModule < Msf::Post
     output = ""
     if datastore['PASSWORD']
       password = datastore['PASSWORD']
-      result = execute("echo #{password} | sudo -S -l", 15)
+      result = execute("echo #{password} | sudo -S -l", 45)
     else
-      result = execute("sudo -l", 15)
+      result = execute("sudo -l", 45)
     end
     if result.downcase =~ /may run/
       print_good("User #{@@user} has some sudo rights, check output...")
